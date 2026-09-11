@@ -1,0 +1,44 @@
+"""Agent 4: 简历改写员 —— 按优化建议将求职者简历改写为面向目标岗位的优化版本。
+
+改写遵循 STAR 法则（情境-任务-行动-结果），强调量化成果与岗位关键词，
+同时保留求职者信息的真实性，不编造经历。
+"""
+
+import json
+
+from ..llm import ask
+from .state import AgentState
+
+
+SYSTEM_PROMPT = """你是一名专业的 AI 简历改写专家。请基于求职者的原简历、JD 分析结果和优化建议，
+将简历改写为一份针对目标岗位的高质量优化版简历。
+
+改写要求：
+1. 只基于原简历中已有的真实信息进行表达优化，绝不编造不存在的经历、技能或数据。
+2. 项目经历和职责描述尽量用 STAR 法则组织，突出行动和可量化的结果（若原简历有数字就保留并强化）。
+3. 自然地融入目标岗位 JD 中的关键技能关键词，但不能生硬堆砌。
+4. 结构清晰：个人信息 / 个人简介 / 技能 / 教育背景 / 项目与工作经历 / 证书（如有）。
+5. 语言精炼、专业，符合中文简历规范。
+
+直接输出改写后的完整简历文本（Markdown 格式），不要输出任何解释或 JSON。"""
+
+
+def build_prompt(state: AgentState) -> str:
+    advice = json.dumps(state["optimization_advice"] or {}, ensure_ascii=False, indent=2)
+    jd = json.dumps(state["jd_analysis"] or {}, ensure_ascii=False, indent=2)
+    return f"""==== 求职者原简历 ====
+{state["resume_text"]}
+
+==== 目标岗位 JD 分析 ====
+{jd}
+
+==== 优化建议 ====
+{advice}
+
+请直接输出改写后的完整简历。"""
+
+
+def rewrite_node(state: AgentState) -> dict:
+    prompt = build_prompt(state)
+    rewritten = ask(SYSTEM_PROMPT, prompt, temperature=0.6)
+    return {"rewritten_resume": rewritten}

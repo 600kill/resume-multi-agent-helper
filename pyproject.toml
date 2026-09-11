@@ -1,0 +1,29 @@
+[project]
+name = "resume-multi-agent"
+version = "0.1.0"
+description = "简历多智能体优化助手：FastAPI + LangGraph 5 Agent 流水线 + Vue 前端"
+readme = "README.md"
+authors = [
+    { name = "user6115120866", email = "4298446841324051-user6115120866@noreply.coze.cn" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "coze-coding-dev-sdk",
+    "fastapi",
+    "langchain-core",
+    "langgraph",
+    "psycopg2-binary",
+    "pydantic-settings",
+    "python-multipart",
+    "redis",
+    "sqlalchemy",
+    "sse-starlette",
+    "uvicorn[standard]",
+]
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.uv]
+package = false
