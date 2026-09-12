@@ -41,8 +41,14 @@ SYSTEM_PROMPT = """你是一名严格的模拟 HR 质检员和简历筛选专家
 
 def build_prompt(state: AgentState, round_num: int) -> str:
     jd = json.dumps(state["jd_analysis"] or {}, ensure_ascii=False, indent=2)
-    advice = json.dumps(state["optimization_advice"] or {}, ensure_ascii=False, indent=2)
-    extra = ""
+    fixes = state.get("fix_instructions") or []
+    if fixes:
+        # 迭代轮：明确告知上一轮质检提出的修改要求，便于核对本轮是否落实
+        req_lines = "\n".join(f"{i}. {item}" for i, item in enumerate(fixes, 1))
+        requirements = f"上一轮质检提出的修改要求如下，请核对改写稿是否逐条落实：\n{req_lines}"
+    else:
+        # 首轮质检：保持原行为，使用顾问的优化建议
+        requirements = json.dumps(state["optimization_advice"] or {}, ensure_ascii=False, indent=2)
     if state.get("rewritten_resume"):
         extra = f'''==== 待质检的改写后简历 ====\n{state["rewritten_resume"]}'''
     else:
@@ -53,7 +59,7 @@ def build_prompt(state: AgentState, round_num: int) -> str:
 {jd}
 
 ==== 本轮优化要求（上一轮质检给出的修改指令） ====
-{advice}
+{requirements}
 
 {extra}
 
@@ -61,8 +67,18 @@ def build_prompt(state: AgentState, round_num: int) -> str:
 
 
 def hr_qc_node(state: AgentState) -> dict:
-    round_num = state.get("qc_rounds", 0) + 1
+    # 轮次以改写节点维护的 iteration_round 为准（每次改写后已 +1）
+    round_num = state.get("iteration_round", 0) or state.get("qc_rounds", 0) or 1
     prompt = build_prompt(state, round_num)
     qc = ask_json(SYSTEM_PROMPT, prompt, temperature=0.2)
     passed = bool(qc.get("passed"))
-    return {"final_qc": qc, "qc_passed": passed, "qc_rounds": round_num}
+    fix_instructions = qc.get("fix_instructions") or []
+    if not isinstance(fix_instructions, list):
+        fix_instructions = [str(fix_instructions)]
+    return {
+        "final_qc": qc,
+        "qc_passed": passed,
+        "qc_rounds": round_num,
+        "iteration_round": round_num,
+        "fix_instructions": fix_instructions,
+    }

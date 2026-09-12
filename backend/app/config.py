@@ -9,8 +9,12 @@ class Settings(BaseSettings):
     app_name: str = "简历多智能体优化助手"
     version: str = "0.1.0"
 
-    # LLM
-    model: str = "doubao-seed-2-0-pro-260215"
+    # LLM（OpenAI 兼容端点；本地经 CC Switch / Codex 客户端转发）
+    model: str = "glm-4.6v"
+    llm_base_url: str = "http://127.0.0.1:15721/v1"
+    llm_api_key: str = "ccswitch-local"  # 本地代理不鉴权，占位即可
+    llm_timeout: int = 180
+    llm_max_tokens: int = 8192
 
     # PostgreSQL
     database_url: str = "postgresql://resume:resume@127.0.0.1:5432/resume_agent"
@@ -19,8 +23,8 @@ class Settings(BaseSettings):
     redis_url: str = "redis://127.0.0.1:6379/0"
     cache_ttl: int = 3600  # 分析结果缓存 1 小时
 
-    # HR 质检最大迭代轮次
-    max_qc_rounds: int = 2
+    # HR 质检最大迭代轮次（改写次数上限，防止死循环）
+    max_qc_rounds: int = 3
 
     model_config = SettingsConfigDict(
         env_file=".env",

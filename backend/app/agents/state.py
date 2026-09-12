@@ -23,5 +23,9 @@ class AgentState(TypedDict):
     qc_passed: Optional[bool]
     qc_rounds: int
 
+    # 质检打回改写：上一轮 HR 给出的具体修改指令 + 当前改写迭代轮次（0=尚未改写）
+    fix_instructions: Optional[list]
+    iteration_round: int
+
     # 运行消息（用于进度回调）
     messages: Annotated[list, add_messages]

@@ -1,14 +1,10 @@
-"""分析服务：负责运行 LangGraph 流水线，持久化结果，并做 Redis 缓存。"""
+"""分析服务：负责运行 LangGraph 流水线并把结果持久化到 DB（Redis 缓存由路由层负责）。"""
 
 from typing import Callable, Optional
 
-from ..cache import cache_get_json, cache_key, cache_set_json
-from ..config import get_settings
 from ..db import SessionLocal
 from ..models import AnalysisRecord
 from .graph import build_graph
-
-settings = get_settings()
 
 _graph: Optional[Callable] = None
 
@@ -27,7 +23,7 @@ def run_analysis(
     target_position: str = "",
     record_id: int | None = None,
 ) -> dict:
-    """执行完整分析流水线，返回结构化结果，并写入 DB 与 Redis 缓存。"""
+    """执行完整分析流水线，返回结构化结果并持久化到 DB（缓存由路由层负责）。"""
 
     graph = get_graph()
     initial: dict = {
@@ -42,6 +38,8 @@ def run_analysis(
         "final_qc": None,
         "qc_passed": None,
         "qc_rounds": 0,
+        "fix_instructions": None,
+        "iteration_round": 0,
         "messages": [],
     }
 
@@ -61,8 +59,6 @@ def run_analysis(
     except Exception as e:  # 持久化失败不影响返回结果
         summary["_db_warning"] = str(e)
 
-    # 写缓存
-    cache_set_json(cache_key("analysis", "raw", target_position, resume_text[:60]), summary)
     return summary
 
 

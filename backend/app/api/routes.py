@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..agents.service import run_analysis
-from ..cache import cache_get_json, cache_key, cache_set_json
+from ..cache import cache_get_json, cache_set_json, make_cache_key
 from ..config import get_settings
 from ..db import get_db
 from ..models import AnalysisRecord
@@ -81,8 +81,16 @@ def analyze(req: AnalysisRequest, db: Session = Depends(get_db)) -> AnalysisResp
     db.commit()
     db.refresh(rec)
 
-    cache_key_id = cache_key("analysis", "by_record", str(rec.id))
-    cached = cache_get_json(cache_key_id)
+    # 主流程缓存：key 只由输入内容决定（排序哈希），同内容重复请求可命中
+    content_key = make_cache_key(
+        "analysis",
+        resume_text=req.resume_text,
+        jd_text=req.jd_text,
+        user_notes=req.user_notes,
+        target_position=req.target_position,
+    )
+    meta = {"record_id": rec.id, "target_position": req.target_position}
+    cached = cache_get_json(content_key, metadata=meta)
     if cached:
         rec.status = "done"
         for field in ("parsed_resume", "jd_analysis", "optimization_advice", "rewritten_resume", "final_qc"):
@@ -105,5 +113,5 @@ def analyze(req: AnalysisRequest, db: Session = Depends(get_db)) -> AnalysisResp
         db.commit()
         return AnalysisResponse(error=str(e))
 
-    cache_set_json(cache_key_id, summary)
+    cache_set_json(content_key, summary, ttl=settings.cache_ttl)
     return AnalysisResponse(record_id=rec.id, **summary)

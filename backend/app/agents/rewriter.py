@@ -26,19 +26,44 @@ SYSTEM_PROMPT = """你是一名专业的 AI 简历改写专家。请基于求职
 def build_prompt(state: AgentState) -> str:
     advice = json.dumps(state["optimization_advice"] or {}, ensure_ascii=False, indent=2)
     jd = json.dumps(state["jd_analysis"] or {}, ensure_ascii=False, indent=2)
+
+    # 质检打回时，把上一轮 HR 的具体修改指令置顶注入；首轮无指令则完全不加，保持原 prompt
+    fixes = state.get("fix_instructions") or []
+    fix_block = ""
+    if fixes:
+        lines = "\n".join(f"{i}. {item}" for i, item in enumerate(fixes, 1))
+        round_num = state.get("iteration_round", 0)
+        fix_block = (
+            f"\n==== 上一轮质检未通过，请逐条落实以下修改要求（第 {round_num} 轮改写）====\n"
+            f"{lines}\n"
+        )
+
     return f"""==== 求职者原简历 ====
 {state["resume_text"]}
 
 ==== 目标岗位 JD 分析 ====
 {jd}
-
+{fix_block}
 ==== 优化建议 ====
 {advice}
 
 请直接输出改写后的完整简历。"""
 
 
+def _strip_code_fence(text: str) -> str:
+    """模型偶尔会用 ```markdown ... ``` 包裹输出，剥掉围栏只留正文。"""
+    t = text.strip()
+    if t.startswith("```"):
+        first_nl = t.find("\n")
+        t = t[first_nl + 1 :] if first_nl != -1 else t[3:]
+    if t.rstrip().endswith("```"):
+        t = t.rstrip()[:-3]
+    return t.strip()
+
+
 def rewrite_node(state: AgentState) -> dict:
+    iteration_round = state.get("iteration_round", 0) + 1
+    state = {**state, "iteration_round": iteration_round}
     prompt = build_prompt(state)
-    rewritten = ask(SYSTEM_PROMPT, prompt, temperature=0.6)
-    return {"rewritten_resume": rewritten}
+    rewritten = _strip_code_fence(ask(SYSTEM_PROMPT, prompt, temperature=0.6))
+    return {"rewritten_resume": rewritten, "iteration_round": iteration_round}

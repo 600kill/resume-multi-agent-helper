@@ -22,9 +22,9 @@ settings = get_settings()
 
 
 def route_after_qc(state: AgentState) -> str:
-    """质检未通过且未超轮次 -> 打回改写员；否则结束。"""
+    """质检未通过且改写轮次未达上限 -> 打回改写员；否则结束。"""
     passed = state.get("qc_passed")
-    rounds = state.get("qc_rounds", 0)
+    rounds = state.get("iteration_round") or state.get("qc_rounds", 0)
     if not passed and rounds < settings.max_qc_rounds:
         return "rewriter"
     return "end"
