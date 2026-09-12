@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # HR 质检最大迭代轮次（改写次数上限，防止死循环）
     max_qc_rounds: int = 3
 
+    # JWT 鉴权
+    jwt_secret: str = "resume-agent-jwt-secret-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_days: int = 7
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_prefix="RESUME_",
