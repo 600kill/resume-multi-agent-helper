@@ -42,11 +42,21 @@ class AnalysisRecord(Base):
     parsed_resume: Mapped[Optional[dict]] = mapped_column(JSON)
     jd_analysis: Mapped[Optional[dict]] = mapped_column(JSON)
 
+    # 工作模式：optimize=直接优化后测评；compare=原始测评→优化→优化后测评（前后对比）
+    mode: Mapped[str] = mapped_column(String(16), default="optimize")
+    # compare 模式下原始简历的基线测评结果（optimize 模式为 None）
+    baseline_qc: Mapped[Optional[dict]] = mapped_column(JSON)
+
     # 任务整体状态：pending|running|iterating|done|stopped|error
     status: Mapped[str] = mapped_column(String(32), default="pending")
     current_step: Mapped[Optional[str]] = mapped_column(String(32), default=None)  # parser|jd_analyst|advisor|rewriter|hr_qc
+    current_step_name: Mapped[Optional[str]] = mapped_column(String(64), default=None)  # 节点名
+    current_step_desc: Mapped[Optional[str]] = mapped_column(Text, default=None)        # 动态文案
+    iteration_round: Mapped[int] = mapped_column(Integer, default=0)                     # 当前质检迭代轮次
     current_round: Mapped[int] = mapped_column(Integer, default=0)  # 已完成的迭代轮次
     error: Mapped[Optional[str]] = mapped_column(Text)
+    failed_step: Mapped[Optional[str]] = mapped_column(String(64), default=None)  # 失败步骤名
+    cache_hit: Mapped[Optional[bool]] = mapped_column(Boolean, default=False)      # 缓存命中标记
 
     user: Mapped["User"] = relationship(back_populates="records")
     iterations: Mapped[list["Iteration"]] = relationship(

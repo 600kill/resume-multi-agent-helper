@@ -51,6 +51,7 @@ onMounted(load)
         <tr>
           <th>时间</th>
           <th>目标岗位</th>
+          <th>方式</th>
           <th>总分</th>
           <th>轮次</th>
           <th>状态</th>
@@ -61,6 +62,11 @@ onMounted(load)
         <tr v-for="r in records" :key="r.id">
           <td>{{ r.created_at?.slice(0, 19).replace('T', ' ') }}</td>
           <td>{{ r.target_position || '—' }}</td>
+          <td>
+            <span class="mode-mini" :class="r.mode === 'compare' ? 'mc-compare' : 'mc-optimize'">
+              {{ r.mode === 'compare' ? '前后对比' : '优化测评' }}
+            </span>
+          </td>
           <td>{{ r.overall_score != null ? r.overall_score : '—' }}</td>
           <td>{{ r.current_round }}/3</td>
           <td><span class="badge" :class="statusClass(r.status)">{{ statusLabel(r.status) }}</span></td>
@@ -106,6 +112,12 @@ h2 { font-size: 20px; }
   background: var(--ink); color: #fff; border: none; padding: 4px 12px;
   border-radius: 6px; font-size: 12px;
 }
+
+.mode-mini {
+  display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 12px; white-space: nowrap;
+}
+.mc-optimize { background: rgba(91, 107, 124, 0.12); color: var(--slate); }
+.mc-compare { background: rgba(217, 119, 87, 0.12); color: var(--accent); }
 
 .empty { color: var(--slate); font-size: 14px; padding: 40px 0; text-align: center; }
 .empty a { color: var(--accent); }

@@ -1,5 +1,5 @@
 import { reactive } from 'vue'
-import { getTaskStatus } from '../api'
+import { getRecordDetail } from '../api'
 
 // 任务轮询状态：currentRecordId 存 localStorage，刷新后可继续轮询
 const state = reactive({
@@ -8,6 +8,9 @@ const state = reactive({
   polling: false,
   error: '',
   pollTimer: null,
+  // 已运行时长（秒），由前端计时器维护
+  elapsed: 0,
+  elapsedTimer: null,
 })
 
 function setRecordId(id) {
@@ -19,11 +22,27 @@ function setRecordId(id) {
   }
 }
 
+function startElapsedTimer() {
+  stopElapsedTimer()
+  state.elapsed = 0
+  state.elapsedTimer = setInterval(() => {
+    state.elapsed += 1
+  }, 1000)
+}
+
+function stopElapsedTimer() {
+  if (state.elapsedTimer) {
+    clearInterval(state.elapsedTimer)
+    state.elapsedTimer = null
+  }
+}
+
 function startPolling(onUpdate, intervalMs = 1500) {
   if (state.polling) return
   if (!state.currentRecordId) return
   state.polling = true
   state.error = ''
+  startElapsedTimer()
 
   const tick = async () => {
     if (!state.currentRecordId) {
@@ -31,18 +50,11 @@ function startPolling(onUpdate, intervalMs = 1500) {
       return
     }
     try {
-      const { data } = await getTaskStatus(state.currentRecordId)
+      const { data } = await getRecordDetail(state.currentRecordId)
       state.status = data
       onUpdate?.(data)
       // 终态停止轮询
-      const terminal = ['done', 'stopped', 'error', 'iterating']
-      // iterating 也停（等用户操作），done/stopped/error 终态
-      if (['done', 'stopped', 'error'].includes(data.status)) {
-        stopPolling()
-        return
-      }
-      // iterating：首轮/迭代轮跑完后是 iterating，也停（等用户决定继续或停止）
-      if (data.status === 'iterating' && !data.current_step) {
+      if (['done', 'error'].includes(data.status)) {
         stopPolling()
         return
       }
@@ -62,6 +74,7 @@ function stopPolling() {
     clearInterval(state.pollTimer)
     state.pollTimer = null
   }
+  stopElapsedTimer()
 }
 
 function reset() {
@@ -69,6 +82,7 @@ function reset() {
   setRecordId(null)
   state.status = null
   state.error = ''
+  state.elapsed = 0
 }
 
 export function useTask() {

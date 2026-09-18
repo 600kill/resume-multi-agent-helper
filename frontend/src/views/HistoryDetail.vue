@@ -34,13 +34,66 @@ const currentIteration = computed(() => {
 const qcScores = computed(() => {
   const s = currentIteration.value?.final_qc?.scores || {}
   return [
-    { label: '岗位匹配度', key: 'match_score' },
-    { label: '关键词覆盖', key: 'keyword_score' },
-    { label: '成果表达力', key: 'impact_score' },
-    { label: '结构清晰度', key: 'clarity_score' },
-    { label: '真实性', key: 'authenticity_score' },
-  ].map(({ label, key }) => ({ label, value: Math.max(0, Math.min(100, Number(s[key]) || 0)) }))
+    { label: 'JD 匹配度', key: 'jd_match', max: 35 },
+    { label: '内容证据质量', key: 'evidence_quality', max: 25 },
+    { label: '真实性边界', key: 'authenticity', max: 15 },
+    { label: 'ATS 友好性', key: 'ats_friendly', max: 15 },
+    { label: '可读性', key: 'readability', max: 10 },
+  ].map(({ label, key, max }) => ({
+    label,
+    max,
+    value: Math.max(0, Math.min(max, Number(s[key]) || 0)),
+  }))
 })
+
+const overallScore = computed(() => {
+  const s = currentIteration.value?.final_qc
+  return s?.overall_score ?? null
+})
+
+// ---- compare 模式：优化前后对比 ----
+const DIMENSIONS = [
+  { label: 'JD 匹配度', key: 'jd_match', max: 35 },
+  { label: '内容证据质量', key: 'evidence_quality', max: 25 },
+  { label: '真实性边界', key: 'authenticity', max: 15 },
+  { label: 'ATS 友好性', key: 'ats_friendly', max: 15 },
+  { label: '可读性', key: 'readability', max: 10 },
+]
+
+const isCompare = computed(() => record.value?.mode === 'compare')
+const baselineQc = computed(() => record.value?.baseline_qc || null)
+const baselineOverall = computed(() => baselineQc.value?.overall_score ?? null)
+const overallDelta = computed(() => {
+  if (baselineOverall.value == null || overallScore.value == null) return null
+  return Math.round((Number(overallScore.value) - Number(baselineOverall.value)) * 100) / 100
+})
+
+function clampScore(v, max) {
+  const n = Math.max(0, Math.min(max, Number(v) || 0))
+  return Math.round(n * 100) / 100
+}
+
+const compareRows = computed(() => {
+  const before = baselineQc.value?.scores || {}
+  const after = currentIteration.value?.final_qc?.scores || {}
+  return DIMENSIONS.map(({ label, key, max }) => {
+    const b = clampScore(before[key], max)
+    const a = clampScore(after[key], max)
+    return {
+      label,
+      max,
+      before: b,
+      after: a,
+      delta: Math.round((a - b) * 100) / 100,
+    }
+  })
+})
+
+function deltaText(d) {
+  if (d > 0) return `+${d}`
+  if (d < 0) return `${d}`
+  return '0'
+}
 
 onMounted(load)
 </script>
@@ -54,6 +107,7 @@ onMounted(load)
       </div>
       <div class="status-line">
         <span class="badge">状态：{{ record.status }}</span>
+        <span class="mode-tag">{{ isCompare ? '前后对比测评' : '优化后测评' }}</span>
         <span class="round">迭代轮次：{{ record.current_round }}/3</span>
         <span class="time">{{ record.created_at?.slice(0, 19).replace('T', ' ') }}</span>
       </div>
@@ -66,6 +120,42 @@ onMounted(load)
       <div class="kv"><b>简历原文：</b><pre class="raw">{{ record.resume_text }}</pre></div>
       <div v-if="record.jd_text" class="kv"><b>JD：</b><pre class="raw">{{ record.jd_text }}</pre></div>
       <div v-if="record.user_notes" class="kv"><b>补充建议：</b><span>{{ record.user_notes }}</span></div>
+    </div>
+
+    <!-- compare 模式：优化前后对比 -->
+    <div class="card" v-if="isCompare && baselineQc && currentIteration">
+      <h3>优化前后评分对比</h3>
+      <div class="compare-hero">
+        <div class="hero-side">
+          <span class="hero-label">优化前 · 原始简历</span>
+          <b class="hero-score">{{ baselineOverall ?? '—' }}</b>
+          <span class="hero-total">/100</span>
+        </div>
+        <div class="hero-arrow">
+          <span>➜</span>
+          <span v-if="overallDelta != null" class="hero-delta" :class="overallDelta >= 0 ? 'up' : 'down'">
+            {{ overallDelta >= 0 ? '提升' : '下降' }} {{ Math.abs(overallDelta) }} 分
+          </span>
+        </div>
+        <div class="hero-side">
+          <span class="hero-label">优化后简历</span>
+          <b class="hero-score">{{ overallScore ?? '—' }}</b>
+          <span class="hero-total">/100</span>
+        </div>
+      </div>
+      <table class="compare-table">
+        <thead>
+          <tr><th>评估维度</th><th>优化前</th><th>优化后</th><th>变化</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in compareRows" :key="r.label">
+            <td class="dim-name">{{ r.label }}</td>
+            <td>{{ r.before }}/{{ r.max }}</td>
+            <td><b>{{ r.after }}/{{ r.max }}</b></td>
+            <td :class="r.delta > 0 ? 'up' : r.delta < 0 ? 'down' : 'flat'">{{ deltaText(r.delta) }}</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- 迭代版本切换 -->
@@ -82,11 +172,10 @@ onMounted(load)
       <div v-if="currentIteration" class="iteration">
         <!-- HR 评分 -->
         <div class="qc-block">
-          <h4>HR 质检评分</h4>
+          <h4>HR 质检评分（总分 {{ overallScore }}/100）</h4>
           <div class="scores">
             <div v-for="s in qcScores" :key="s.label" class="score">
-              <div class="score-head"><span>{{ s.label }}</span><b>{{ s.value }}</b></div>
-              <div class="bar"><span :style="{ width: s.value + '%' }"></span></div>
+              <div class="score-head"><span>{{ s.label }}</span><b>{{ s.value }}/{{ s.max }}</b></div>
             </div>
           </div>
           <p v-if="currentIteration.final_qc?.comments" class="comment">
@@ -158,8 +247,6 @@ h4 { font-size: 15px; margin-bottom: 12px; }
 .qc-block { padding: 16px; background: var(--paper); border-radius: 8px; }
 .scores { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .score-head { display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 4px; }
-.bar { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
-.bar span { display: block; height: 100%; background: var(--accent); }
 .comment { margin: 12px 0 0; font-size: 13px; color: var(--slate); }
 .fix-list { margin: 8px 0 0; font-size: 13px; }
 .fix-item { display: inline-block; margin: 2px 6px 0 0; padding: 2px 8px; background: var(--border); border-radius: 4px; font-size: 12px; }
@@ -176,4 +263,30 @@ h4 { font-size: 15px; margin-bottom: 12px; }
   color: var(--danger); font-size: 13px; padding: 8px 12px;
   background: rgba(192, 72, 63, 0.08); border-radius: 6px;
 }
+
+.mode-tag {
+  background: rgba(70, 90, 120, 0.1); color: var(--slate);
+  padding: 2px 10px; border-radius: 12px; font-weight: 500;
+}
+
+/* 前后对比 */
+.compare-hero {
+  display: flex; align-items: center; justify-content: center; gap: 28px;
+  padding: 22px 20px; background: var(--paper); border-radius: 10px; margin-bottom: 16px;
+}
+.hero-side { display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.hero-label { font-size: 13px; color: var(--slate); }
+.hero-score { font-size: 36px; font-weight: 700; line-height: 1.1; color: var(--ink); }
+.hero-total { font-size: 13px; color: var(--slate); }
+.hero-arrow { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 22px; color: var(--slate); }
+.hero-delta { font-size: 13px; font-weight: 600; white-space: nowrap; }
+.up { color: var(--success); }
+.down { color: var(--danger); }
+.flat { color: var(--slate); }
+.compare-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.compare-table th, .compare-table td {
+  padding: 8px 10px; border-bottom: 1px solid var(--border); text-align: center;
+}
+.compare-table th { color: var(--slate); font-weight: 500; }
+.compare-table td.dim-name { text-align: left; color: var(--ink); }
 </style>

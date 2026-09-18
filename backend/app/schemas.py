@@ -1,6 +1,10 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+# 工作模式：optimize=直接优化后测评（选项一）；compare=原始测评→优化→再测评（选项二）
+AnalyzeMode = Literal["optimize", "compare"]
 
 
 # ---------------------------- 健康检查 ---------------------------- #
@@ -11,34 +15,41 @@ class HealthResponse(BaseModel):
     version: str
 
 
-# ---------------------------- 任务（替代原 /analyze） ---------------------------- #
+# ---------------------------- 分析任务 ---------------------------- #
 
-class TaskCreateRequest(BaseModel):
+class AnalyzeRequest(BaseModel):
     resume_text: str = Field(..., min_length=1, description="简历原文")
     jd_text: str = Field("", description="目标岗位 JD（可选）")
     user_notes: str = Field("", description="求职者补充建议/期望（可选）")
     target_position: str = Field("", description="目标岗位名称（可选）")
+    mode: AnalyzeMode = Field("optimize", description="工作模式：optimize=直接优化后测评；compare=前后对比测评")
 
 
-class TaskCreateResponse(BaseModel):
-    task_id: str
+class AnalyzeResponse(BaseModel):
+    """异步提交响应：立即返回 record_id，后台执行 LangGraph。"""
     record_id: int
+    task_id: str
 
 
 class TaskStatus(BaseModel):
-    """轮询响应：任务整体状态 + 最新一轮迭代结果 + 迭代进度。"""
+    """轮询响应：任务整体状态 + 当前步骤 + 最新一轮迭代结果。"""
     record_id: int
     status: str
     current_step: Optional[str] = None
-    current_round: int = 0
+    current_step_name: Optional[str] = None
+    current_step_desc: Optional[str] = None
+    iteration_round: int = 0
     max_rounds: int = 3
     target_position: Optional[str] = None
-    # 最新一轮迭代产物（供前端展示本轮稿件+评分+修改意见）
     latest_iteration: Optional[dict] = None
-    # 首轮一次性产物（解析+JD分析，可空）
     parsed_resume: Optional[dict] = None
     jd_analysis: Optional[dict] = None
+    mode: str = "optimize"
+    baseline_qc: Optional[dict] = None
     error: Optional[str] = None
+    failed_step: Optional[str] = None
+    cache_hit: bool = False
+    created_at: Optional[str] = None
 
 
 class TaskActionResponse(BaseModel):
@@ -56,6 +67,7 @@ class RecordListItem(BaseModel):
     overall_score: Optional[float] = None
     current_round: int = 0
     status: str
+    mode: str = "optimize"
 
 
 class IterationItem(BaseModel):
@@ -77,7 +89,15 @@ class RecordDetail(BaseModel):
     target_position: Optional[str] = None
     parsed_resume: Optional[dict] = None
     jd_analysis: Optional[dict] = None
+    mode: str = "optimize"
+    baseline_qc: Optional[dict] = None
     current_round: int = 0
+    iteration_round: int = 0
     status: str
+    current_step: Optional[str] = None
+    current_step_name: Optional[str] = None
+    current_step_desc: Optional[str] = None
     error: Optional[str] = None
+    failed_step: Optional[str] = None
+    cache_hit: bool = False
     iterations: list[IterationItem] = []

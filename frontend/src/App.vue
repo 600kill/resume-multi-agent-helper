@@ -2,15 +2,24 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuth } from './composables/useAuth'
+import { useTask } from './composables/useTask'
 
 const route = useRoute()
 const router = useRouter()
 const { state, logout } = useAuth()
+const { reset: resetTask } = useTask()
 
 const isAuthPage = computed(() => ['/login', '/register'].includes(route.path))
 const isLoggedIn = computed(() => !!state.token)
 
+// 任何时候点「新建任务」都清空旧任务面板，确保回到输入表单（含两个测评选项）
+function goNewTask() {
+  resetTask()
+  router.push('/')
+}
+
 function onLogout() {
+  resetTask()
   logout()
   router.push('/login')
 }
@@ -27,7 +36,7 @@ function onLogout() {
         </div>
       </div>
       <nav class="nav">
-        <router-link to="/" class="nav-item">新建任务</router-link>
+        <a class="nav-item" href="javascript:void(0)" @click="goNewTask">新建任务</a>
         <router-link to="/history" class="nav-item">历史记录</router-link>
         <div v-if="isLoggedIn" class="user-info">
           <span class="username">{{ state.user?.username }}</span>

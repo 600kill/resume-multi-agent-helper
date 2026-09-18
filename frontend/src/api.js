@@ -21,7 +21,6 @@ http.interceptors.response.use(
     if (err.response?.status === 401) {
       localStorage.removeItem('token')
       localStorage.removeItem('user')
-      // 避免在登录页死循环跳转
       if (!location.pathname.startsWith('/login')) {
         location.href = '/login'
       }
@@ -48,30 +47,25 @@ export function getMe() {
   return http.get('/auth/me')
 }
 
-// ---------------------------- 任务（异步队列） ---------------------------- //
-export function createTask(payload) {
-  return http.post('/tasks', payload)
+// ---------------------------- 分析任务（异步） ---------------------------- //
+export function analyze(payload) {
+  return http.post('/analyze', payload)
 }
 
-export function getTaskStatus(recordId) {
-  return http.get(`/tasks/${recordId}`)
+// 兼容旧调用名
+export const createTask = analyze
+
+// 轮询任务详情（含步骤进度 + 迭代结果）
+export function getRecordDetail(id) {
+  return http.get(`/records/${id}`)
 }
 
-export function iterateTask(recordId) {
-  return http.post(`/tasks/${recordId}/iterate`)
-}
-
-export function stopTask(recordId) {
-  return http.post(`/tasks/${recordId}/stop`)
-}
+// 兼容旧调用名
+export const getTaskStatus = getRecordDetail
 
 // ---------------------------- 历史记录 ---------------------------- //
 export function listRecords() {
   return http.get('/records')
-}
-
-export function getRecordDetail(id) {
-  return http.get(`/records/${id}`)
 }
 
 export default http

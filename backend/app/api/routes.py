@@ -1,23 +1,26 @@
-"""任务与历史接口：替代旧 /api/analyze，使用 RQ 异步队列。"""
+"""任务与历史接口：异步 /api/analyze + /api/records/{id} 轮询。
+
+- POST /api/analyze：建 record + 入队 RQ，立即返回 record_id
+- GET /api/records/{id}：返回状态 + 当前步骤 + 最新迭代（供前端轮询）
+- GET /api/records：当前用户历史列表
+"""
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ..auth import get_current_user
-from ..cache import cache_get_json, cache_set_json, make_cache_key
 from ..config import get_settings
 from ..db import get_db
 from ..models import AnalysisRecord, Iteration, User
 from ..schemas import (
+    AnalyzeRequest,
+    AnalyzeResponse,
     IterationItem,
     RecordDetail,
     RecordListItem,
-    TaskActionResponse,
-    TaskCreateRequest,
-    TaskCreateResponse,
     TaskStatus,
 )
-from ..worker import enqueue_first_round, enqueue_next_round, get_step_from_redis
+from ..worker import enqueue_analysis, get_step_from_redis
 
 router = APIRouter(prefix="/api", tags=["tasks"])
 
@@ -31,30 +34,43 @@ def health() -> dict:
     return {"status": "ok", "app": settings.app_name, "version": settings.version}
 
 
-# ---------------------------- 任务（异步队列） ---------------------------- #
+# ---------------------------- 异步分析 ---------------------------- #
 
-@router.post("/tasks", response_model=TaskCreateResponse)
-def create_task(
-    req: TaskCreateRequest,
+@router.post("/analyze", response_model=AnalyzeResponse)
+def analyze(
+    req: AnalyzeRequest,
     db: Session = Depends(get_db),
     current: User = Depends(get_current_user),
-) -> TaskCreateResponse:
-    """建 record + 入队首轮任务，返回 task_id + record_id。"""
+) -> AnalyzeResponse:
+    """异步分析：建 record + 入队 RQ，立即返回 record_id，后台执行 LangGraph。"""
     rec = AnalysisRecord(
         user_id=current.id,
         resume_text=req.resume_text,
         jd_text=req.jd_text,
         user_notes=req.user_notes,
         target_position=req.target_position,
+        mode=req.mode,
         status="pending",
     )
     db.add(rec)
     db.commit()
     db.refresh(rec)
 
-    task_id = enqueue_first_round(rec.id)
-    return TaskCreateResponse(task_id=task_id, record_id=rec.id)
+    task_id = enqueue_analysis(rec.id)
+    return AnalyzeResponse(record_id=rec.id, task_id=task_id)
 
+
+# 兼容旧接口 /api/tasks（行为同 /api/analyze）
+@router.post("/tasks", response_model=AnalyzeResponse)
+def create_task(
+    req: AnalyzeRequest,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+) -> AnalyzeResponse:
+    return analyze(req, db, current)
+
+
+# ---------------------------- 轮询状态 ---------------------------- #
 
 @router.get("/tasks/{record_id}", response_model=TaskStatus)
 def get_task_status(
@@ -62,13 +78,15 @@ def get_task_status(
     db: Session = Depends(get_db),
     current: User = Depends(get_current_user),
 ) -> TaskStatus:
-    """轮询任务状态：返回 status/current_step/最新 iteration/迭代进度。"""
+    """轮询任务状态（兼容旧前端）。"""
     rec = db.get(AnalysisRecord, record_id)
     if rec is None or rec.user_id != current.id:
         raise HTTPException(status_code=404, detail="任务不存在")
 
-    # current_step：优先读 Redis（实时性更高），DB 作为兜底
-    step = get_step_from_redis(record_id) or rec.current_step
+    step_info = get_step_from_redis(record_id) or {}
+    step = step_info.get("step") or rec.current_step
+    desc = step_info.get("desc") or rec.current_step_desc
+    round_num = step_info.get("iteration_round") or rec.iteration_round or 0
 
     latest_iter = (
         db.query(Iteration)
@@ -81,58 +99,21 @@ def get_task_status(
         record_id=record_id,
         status=rec.status,
         current_step=step,
-        current_round=rec.current_round,
+        current_step_name=rec.current_step_name,
+        current_step_desc=desc,
+        iteration_round=round_num,
         max_rounds=settings.max_qc_rounds,
         target_position=rec.target_position,
         latest_iteration=_iteration_to_dict(latest_iter) if latest_iter else None,
         parsed_resume=rec.parsed_resume,
         jd_analysis=rec.jd_analysis,
+        mode=rec.mode or "optimize",
+        baseline_qc=rec.baseline_qc,
         error=rec.error,
+        failed_step=rec.failed_step,
+        cache_hit=bool(rec.cache_hit),
+        created_at=rec.created_at.isoformat() if rec.created_at else None,
     )
-
-
-@router.post("/tasks/{record_id}/iterate", response_model=TaskActionResponse)
-def iterate_task(
-    record_id: int,
-    db: Session = Depends(get_db),
-    current: User = Depends(get_current_user),
-) -> TaskActionResponse:
-    """触发下一轮迭代：校验轮次+状态，入队迭代任务。"""
-    rec = db.get(AnalysisRecord, record_id)
-    if rec is None or rec.user_id != current.id:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    if rec.status == "stopped":
-        raise HTTPException(status_code=400, detail="任务已停止，无法继续迭代")
-    if rec.status == "error":
-        raise HTTPException(status_code=400, detail="任务异常，无法继续迭代")
-    if rec.current_round >= settings.max_qc_rounds:
-        raise HTTPException(status_code=400, detail="已达最大迭代轮次（3轮）")
-    if rec.current_round == 0:
-        raise HTTPException(status_code=400, detail="首轮尚未完成，无法迭代")
-    if rec.status == "running":
-        raise HTTPException(status_code=400, detail="任务正在执行中，请等待完成")
-
-    task_id = enqueue_next_round(record_id)
-    return TaskActionResponse(task_id=task_id, status="iterating", message="已入队下一轮迭代")
-
-
-@router.post("/tasks/{record_id}/stop", response_model=TaskActionResponse)
-def stop_task(
-    record_id: int,
-    db: Session = Depends(get_db),
-    current: User = Depends(get_current_user),
-) -> TaskActionResponse:
-    """停止迭代：锁定当前稿件。"""
-    rec = db.get(AnalysisRecord, record_id)
-    if rec is None or rec.user_id != current.id:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    if rec.status == "stopped":
-        return TaskActionResponse(status="stopped", message="任务已停止")
-    if rec.status == "done":
-        return TaskActionResponse(status="done", message="任务已完成，无需停止")
-    rec.status = "stopped"
-    db.commit()
-    return TaskActionResponse(status="stopped", message="任务已锁定，停止迭代")
 
 
 # ---------------------------- 历史记录 ---------------------------- #
@@ -170,6 +151,7 @@ def list_records(
                 overall_score=score,
                 current_round=r.current_round,
                 status=r.status,
+                mode=r.mode or "optimize",
             )
         )
     return out
@@ -181,10 +163,17 @@ def get_record(
     db: Session = Depends(get_db),
     current: User = Depends(get_current_user),
 ) -> RecordDetail:
-    """任务详情：原始输入 + 所有迭代版本。"""
+    """任务详情：原始输入 + 所有迭代版本 + 当前步骤（供前端轮询）。"""
     rec = db.get(AnalysisRecord, record_id)
     if rec is None or rec.user_id != current.id:
         raise HTTPException(status_code=404, detail="记录不存在")
+
+    # 从 Redis 取实时步骤（比 DB 更及时）
+    step_info = get_step_from_redis(record_id) or {}
+    step = step_info.get("step") or rec.current_step
+    desc = step_info.get("desc") or rec.current_step_desc
+    round_num = step_info.get("iteration_round") or rec.iteration_round or 0
+
     iterations = (
         db.query(Iteration)
         .filter(Iteration.record_id == record_id)
@@ -200,9 +189,17 @@ def get_record(
         target_position=rec.target_position,
         parsed_resume=rec.parsed_resume,
         jd_analysis=rec.jd_analysis,
+        mode=rec.mode or "optimize",
+        baseline_qc=rec.baseline_qc,
         current_round=rec.current_round,
+        iteration_round=round_num,
         status=rec.status,
+        current_step=step,
+        current_step_name=rec.current_step_name,
+        current_step_desc=desc,
         error=rec.error,
+        failed_step=rec.failed_step,
+        cache_hit=bool(rec.cache_hit),
         iterations=[
             IterationItem(
                 round_number=it.round_number,

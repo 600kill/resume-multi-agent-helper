@@ -1,7 +1,6 @@
-"""Agent 4: 简历改写员 —— 按优化建议将求职者简历改写为面向目标岗位的优化版本。
+"""Agent 4: 简历改写员 —— 按 XYZ/HR 阅读规则将简历改写为 ATS 友好的 Markdown。
 
-改写遵循 STAR 法则（情境-任务-行动-结果），强调量化成果与岗位关键词，
-同时保留求职者信息的真实性，不编造经历。
+强制规则：证据优先、XYZ模型、强主动动词、F-Pattern、一事一叙、无空泛形容词。
 """
 
 import json
@@ -10,24 +9,23 @@ from ..llm import ask
 from .state import AgentState
 
 
-SYSTEM_PROMPT = """你是一名专业的 AI 简历改写专家。请基于求职者的原简历、JD 分析结果和优化建议，
-将简历改写为一份针对目标岗位的高质量优化版简历。
+SYSTEM_PROMPT = """你是简历改写Agent，强制规则：
+1. 证据优先：只使用简历原有事实，严禁编造指标/经历/拔高角色。
+2. 技术项目优先XYZ模型(X做什么；Y范围条件；Z结果指标)；STAR仅用于非技术实习。
+3. bullet使用强主动动词；删除responsible for/helped with/participated in等弱表达。
+4. 遵循F-Pattern：量化数字、关键结果前置。
+5. 每条bullet一事一叙，控制2行内；删除"强大、优秀、高性能"等空泛形容词。
+6. 融入Should-Have关键词必须附带上下文，禁止名词堆砌。
+7. 输出标准Markdown，兼容ATS，不用复杂表格。
 
-改写要求：
-1. 只基于原简历中已有的真实信息进行表达优化，绝不编造不存在的经历、技能或数据。
-2. 项目经历和职责描述尽量用 STAR 法则组织，突出行动和可量化的结果（若原简历有数字就保留并强化）。
-3. 自然地融入目标岗位 JD 中的关键技能关键词，但不能生硬堆砌。
-4. 结构清晰：个人信息 / 个人简介 / 技能 / 教育背景 / 项目与工作经历 / 证书（如有）。
-5. 语言精炼、专业，符合中文简历规范。
-
-直接输出改写后的完整简历文本（Markdown 格式），不要输出任何解释或 JSON。"""
+直接输出改写后的完整简历（Markdown 格式），不要输出任何解释或 JSON。"""
 
 
 def build_prompt(state: AgentState) -> str:
     advice = json.dumps(state["optimization_advice"] or {}, ensure_ascii=False, indent=2)
     jd = json.dumps(state["jd_analysis"] or {}, ensure_ascii=False, indent=2)
 
-    # 质检打回时，把上一轮 HR 的具体修改指令置顶注入；首轮无指令则完全不加，保持原 prompt
+    # 质检打回时，把上一轮 HR 的具体修改指令置顶注入；首轮无指令则完全不加
     fixes = state.get("fix_instructions") or []
     fix_block = ""
     if fixes:
@@ -47,7 +45,7 @@ def build_prompt(state: AgentState) -> str:
 ==== 优化建议 ====
 {advice}
 
-请直接输出改写后的完整简历。"""
+请直接输出改写后的完整简历（Markdown）。"""
 
 
 def _strip_code_fence(text: str) -> str:
